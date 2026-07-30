@@ -91,9 +91,9 @@ function formatINR(num: number) {
 
 // Cashfree Environment Helpers
 async function getCashfreeConfig() {
-    let appId = (process.env.CASHFREE_APP_ID || process.env.CASHFREE_CLIENT_ID || "").trim();
-    let secretKey = (process.env.CASHFREE_SECRET_KEY || process.env.CASHFREE_CLIENT_SECRET || "").trim();
-    let rawEnv = (process.env.CASHFREE_ENV || "").trim();
+    let appId = (process.env.CASHFREE_APP_ID || process.env.CASHFREE_CLIENT_ID || "13496932dfc8ed50ec1e5540e223969431").trim();
+    let secretKey = (process.env.CASHFREE_SECRET_KEY || process.env.CASHFREE_CLIENT_SECRET || "cfsk_ma_prod_2fba023b614d4dd9107168d103a2bfed_9720ee8c").trim();
+    let rawEnv = (process.env.CASHFREE_ENV || "production").trim();
     let webhookSecret = (process.env.CASHFREE_WEBHOOK_SECRET || "").trim();
 
     // Fallback to Firebase DB settings/cashfree if env vars not set!
@@ -111,22 +111,10 @@ async function getCashfreeConfig() {
         }
     }
 
-    if (!appId) appId = "13496932dfc8ed50ec1e5540e223969431";
-    if (!secretKey) secretKey = "cfsk_ma_prod_2fba023b614d4dd9107168d103a2bfed_9720ee8c";
-
-    const isTestKey = secretKey.includes("_test_") || appId.toLowerCase().includes("test") || secretKey.startsWith("TEST") || appId.startsWith("TEST");
+    // Auto-detect production mode if secretKey contains "_prod_" or appId contains "prod" or CASHFREE_ENV is PROD/production
     const isProdKey = secretKey.includes("_prod_") || appId.toLowerCase().includes("prod");
-
-    let cfEnv = "PROD";
-    if (isTestKey) {
-        cfEnv = "TEST";
-    } else if (isProdKey) {
-        cfEnv = "PROD";
-    } else if (rawEnv.toUpperCase() === "TEST" || rawEnv.toUpperCase() === "SANDBOX") {
-        cfEnv = "TEST";
-    } else {
-        cfEnv = "PROD";
-    }
+    const isExplicitProd = rawEnv.toLowerCase() === "production" || rawEnv.toUpperCase() === "PROD";
+    const cfEnv = (isExplicitProd || isProdKey) ? "PROD" : "TEST";
 
     const finalWebhookSecret = (webhookSecret || secretKey).trim();
 
@@ -288,19 +276,11 @@ app.post(["/api/cashfree/create-order", "/cashfree/create-order"], async (req: a
         const rawOrderId = `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
         const orderId = rawOrderId.replace(/[^a-zA-Z0-9_]/g, '').substring(0, 45);
 
-        // Build return URL safely
-        let secureBaseUrl = 'https://localhost:3000';
-        try {
-            const rawOrigin = req.body.origin || req.headers.origin || req.headers.referer || req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-            const formattedOrigin = (rawOrigin.startsWith('http://') || rawOrigin.startsWith('https://')) ? rawOrigin : `https://${rawOrigin}`;
-            const parsed = new URL(formattedOrigin);
-            secureBaseUrl = parsed.origin;
-            if (secureBaseUrl.startsWith('http://') && !secureBaseUrl.includes('localhost')) {
-                secureBaseUrl = secureBaseUrl.replace('http://', 'https://');
-            }
-        } catch (e) {
-            console.warn("Unable to parse origin URL, fallback used:", e);
-        }
+        // Build return URL
+        const originUrl = req.body.origin || req.headers.origin || req.headers.referer || ('https://' + (req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000'));
+        const appBaseUrl = new URL(originUrl).origin;
+        // Cashfree strict requirement: URL MUST be https
+        const secureBaseUrl = appBaseUrl.startsWith('http://localhost') ? appBaseUrl.replace('http://', 'https://') : (appBaseUrl.startsWith('http://') ? appBaseUrl.replace('http://', 'https://') : appBaseUrl);
 
         const returnUrl = `${secureBaseUrl}/?order_id=${orderId}&course_id=${courseId}&cf_status={order_id}`;
         const notifyUrl = `${secureBaseUrl}/api/cashfree/webhook`;
